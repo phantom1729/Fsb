@@ -1,0 +1,7 @@
+[build]
+  command = "npm install"
+  publish = ""
+  functions = "functions"
+
+[build.environment]
+  NODE_VERSION = "22.12.0"
