@@ -72,7 +72,7 @@ async function findAvailableAndClaim(plan, paymentId, userId) {
 
   for (const code of codes) {
     const key = codeKey(plan, code);
-    const current = await store.get(key, { type: 'json', consistency: 'strong' });
+    const current = await getJson(key, 'strong');
     if (!current) continue;
     if (current.status === 'assigned') {
       // Never hand an assigned code to anyone else.
