@@ -15,9 +15,13 @@ if (!ADMIN_ID) throw new Error("ADMIN_ID is missing");
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Netlify Blobs
+// --------------------------------------------------
+// NETLIFY BLOBS
+// --------------------------------------------------
+
 const blobsOptions =
-  process.env.BLOBS_TOKEN && (process.env.SITE_ID || process.env.NETLIFY_SITE_ID)
+  process.env.BLOBS_TOKEN &&
+  (process.env.SITE_ID || process.env.NETLIFY_SITE_ID)
     ? {
         token: process.env.BLOBS_TOKEN,
         siteID: process.env.SITE_ID || process.env.NETLIFY_SITE_ID,
@@ -59,7 +63,9 @@ async function getJson(key, consistency = "eventual") {
     consistency,
   });
 
-  if (!result || result.data == null) return null;
+  if (!result || result.data == null) {
+    return null;
+  }
 
   return {
     data: result.data,
@@ -94,7 +100,9 @@ function isAdmin(ctx) {
 async function findAvailableAndClaim(plan) {
   const codes = LICENSES[plan];
 
-  if (!codes) return null;
+  if (!codes) {
+    return null;
+  }
 
   for (const code of codes) {
     const key = `license:${plan}:${code}`;
@@ -119,11 +127,7 @@ async function findAvailableAndClaim(plan) {
       if (result?.modified !== false) {
         return code;
       }
-
-      continue;
     }
-
-    // License already assigned, try next
   }
 
   return null;
@@ -152,23 +156,27 @@ bot.start(async (ctx) => {
 async function showPayment(ctx, plan) {
   await ctx.answerCbQuery();
 
+  const planName =
+    plan === "49"
+      ? "₹49"
+      : plan === "599"
+      ? "₹599"
+      : "₹999";
+
   const upiText =
-    `💳 *Rakshak ${plan === "49" ? "₹49" : plan === "599" ? "₹599" : "₹999"} Plan*\n\n` +
-    `Payment Name: *${PAYMENT_NAME}*\n\n` +
+    `💳 Rakshak ${planName} Plan\n\n` +
+    `Payment Name: ${PAYMENT_NAME}\n\n` +
     `UPI IDs:\n` +
     `• ${PRIMARY_UPI}\n` +
     `• ${BACKUP_UPI_1}\n` +
     `• ${BACKUP_UPI_2}\n\n` +
-    `Payment karne ke baad apna *12-digit UTR number* bhejo.`;
+    `Payment karne ke baad apna 12-digit UTR number bhejo.`;
 
   await ctx.reply(
     upiText,
-    {
-      parse_mode: "Markdown",
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback("⬅️ Back", "back_plans")],
-      ]),
-    }
+    Markup.inlineKeyboard([
+      [Markup.button.callback("⬅️ Back", "back_plans")],
+    ])
   );
 
   await saveUser(ctx.chat.id, {
@@ -182,6 +190,10 @@ async function showPayment(ctx, plan) {
 bot.action("plan_49", (ctx) => showPayment(ctx, "49"));
 bot.action("plan_599", (ctx) => showPayment(ctx, "599"));
 bot.action("plan_999", (ctx) => showPayment(ctx, "999"));
+
+// --------------------------------------------------
+// BACK TO PLANS
+// --------------------------------------------------
 
 bot.action("back_plans", async (ctx) => {
   await ctx.answerCbQuery();
@@ -203,7 +215,9 @@ bot.action("back_plans", async (ctx) => {
 bot.on("text", async (ctx) => {
   const text = ctx.message.text.trim();
 
-  if (text.startsWith("/")) return;
+  if (text.startsWith("/")) {
+    return;
+  }
 
   const user = await getUser(ctx.chat.id);
 
@@ -211,7 +225,7 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  // Only 12 digit UTR
+  // Only 12 digits
   if (!/^\d{12}$/.test(text)) {
     await ctx.reply(
       "❌ Invalid UTR.\n\nPlease send exactly 12 digits."
@@ -232,8 +246,7 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  const paymentId =
-    `${Date.now()}-${ctx.chat.id}`;
+  const paymentId = `${Date.now()}-${ctx.chat.id}`;
 
   const payment = {
     paymentId,
@@ -256,12 +269,19 @@ bot.on("text", async (ctx) => {
   );
 
   if (utrResult?.modified === false) {
-    await ctx.reply("❌ This UTR has already been submitted.");
+    await ctx.reply(
+      "❌ This UTR has already been submitted."
+    );
     return;
   }
 
-  await setJson(`payment:${paymentId}`, payment);
+  // Save payment
+  await setJson(
+    `payment:${paymentId}`,
+    payment
+  );
 
+  // Update user state
   await saveUser(ctx.chat.id, {
     ...user,
     state: "payment_pending",
@@ -269,24 +289,31 @@ bot.on("text", async (ctx) => {
     updatedAt: new Date().toISOString(),
   });
 
+  // Tell user UTR was received
   await ctx.reply(
     "✅ UTR received.\n\n" +
       "Your payment is now waiting for admin verification.\n" +
       "You will receive the activation code after approval."
   );
 
-  // Admin notification
-  await bot.telegram.sendMessage(
-    ADMIN_ID,
-    `🔔 *New Payment Request*\n\n` +
-      `Payment ID: \`${paymentId}\`\n` +
-      `User ID: \`${ctx.chat.id}\`\n` +
+  // --------------------------------------------------
+  // ADMIN NOTIFICATION
+  // --------------------------------------------------
+
+  try {
+    const adminMessage =
+      "🔔 New Payment Request\n\n" +
+      `Payment ID: ${paymentId}\n` +
+      `User ID: ${ctx.chat.id}\n` +
       `Username: @${ctx.from.username || "N/A"}\n` +
+      `Name: ${ctx.from.first_name || "N/A"}\n` +
       `Plan: ₹${user.plan}\n` +
-      `UTR: \`${utr}\``,
-    {
-      parse_mode: "Markdown",
-      ...Markup.inlineKeyboard([
+      `UTR: ${utr}`;
+
+    await bot.telegram.sendMessage(
+      ADMIN_ID,
+      adminMessage,
+      Markup.inlineKeyboard([
         [
           Markup.button.callback(
             "✅ APPROVE",
@@ -297,9 +324,19 @@ bot.on("text", async (ctx) => {
             `reject:${paymentId}`
           ),
         ],
-      ]),
-    }
-  );
+      ])
+    );
+
+    console.log(
+      "Admin notification sent successfully:",
+      paymentId
+    );
+  } catch (adminError) {
+    console.error(
+      "ADMIN NOTIFICATION ERROR:",
+      adminError
+    );
+  }
 });
 
 // --------------------------------------------------
@@ -333,10 +370,14 @@ bot.action(/^approve:(.+)$/, async (ctx) => {
     return;
   }
 
-  const code = await findAvailableAndClaim(payment.plan);
+  const code = await findAvailableAndClaim(
+    payment.plan
+  );
 
   if (!code) {
-    await ctx.answerCbQuery("No license available");
+    await ctx.answerCbQuery(
+      "No license available"
+    );
 
     await ctx.reply(
       `⚠️ No unused license available for ₹${payment.plan}.`
@@ -347,14 +388,17 @@ bot.action(/^approve:(.+)$/, async (ctx) => {
 
   payment.status = "approved";
   payment.license = code;
-  payment.approvedAt = new Date().toISOString();
+  payment.approvedAt =
+    new Date().toISOString();
 
   await setJson(
     `payment:${paymentId}`,
     payment
   );
 
-  const user = await getUser(payment.chatId);
+  const user = await getUser(
+    payment.chatId
+  );
 
   if (user) {
     await saveUser(payment.chatId, {
@@ -365,29 +409,27 @@ bot.action(/^approve:(.+)$/, async (ctx) => {
     });
   }
 
+  // Send activation code to user
   await bot.telegram.sendMessage(
     payment.chatId,
-    `🎉 *Payment Approved!*\n\n` +
-      `Your Rakshak activation code is:\n\n` +
-      `\`${code}\`\n\n` +
-      `Keep this code safe.`,
-    {
-      parse_mode: "Markdown",
-    }
+    "🎉 Payment Approved!\n\n" +
+      "Your Rakshak activation code is:\n\n" +
+      `${code}\n\n` +
+      "Keep this code safe."
   );
 
+  // Update admin message
   await ctx.editMessageText(
-    `✅ *APPROVED*\n\n` +
-      `Payment ID: \`${paymentId}\`\n` +
+    "✅ APPROVED\n\n" +
+      `Payment ID: ${paymentId}\n` +
       `Plan: ₹${payment.plan}\n` +
-      `UTR: \`${payment.utr}\`\n` +
-      `License: \`${code}\``,
-    {
-      parse_mode: "Markdown",
-    }
+      `UTR: ${payment.utr}\n` +
+      `License: ${code}`
   );
 
-  await ctx.answerCbQuery("Approved");
+  await ctx.answerCbQuery(
+    "Approved"
+  );
 });
 
 // --------------------------------------------------
@@ -408,7 +450,9 @@ bot.action(/^reject:(.+)$/, async (ctx) => {
   );
 
   if (!paymentResult) {
-    await ctx.answerCbQuery("Payment not found");
+    await ctx.answerCbQuery(
+      "Payment not found"
+    );
     return;
   }
 
@@ -422,14 +466,17 @@ bot.action(/^reject:(.+)$/, async (ctx) => {
   }
 
   payment.status = "rejected";
-  payment.rejectedAt = new Date().toISOString();
+  payment.rejectedAt =
+    new Date().toISOString();
 
   await setJson(
     `payment:${paymentId}`,
     payment
   );
 
-  const user = await getUser(payment.chatId);
+  const user = await getUser(
+    payment.chatId
+  );
 
   if (user) {
     await saveUser(payment.chatId, {
@@ -439,23 +486,24 @@ bot.action(/^reject:(.+)$/, async (ctx) => {
     });
   }
 
+  // Notify user
   await bot.telegram.sendMessage(
     payment.chatId,
     "❌ Your payment request was rejected by admin.\n\n" +
       "If you believe this is a mistake, please contact support."
   );
 
+  // Update admin message
   await ctx.editMessageText(
-    `❌ *REJECTED*\n\n` +
-      `Payment ID: \`${paymentId}\`\n` +
+    "❌ REJECTED\n\n" +
+      `Payment ID: ${paymentId}\n` +
       `Plan: ₹${payment.plan}\n` +
-      `UTR: \`${payment.utr}\``,
-    {
-      parse_mode: "Markdown",
-    }
+      `UTR: ${payment.utr}`
   );
 
-  await ctx.answerCbQuery("Rejected");
+  await ctx.answerCbQuery(
+    "Rejected"
+  );
 });
 
 // --------------------------------------------------
@@ -464,6 +512,7 @@ bot.action(/^reject:(.+)$/, async (ctx) => {
 
 exports.handler = async (event) => {
   try {
+    // Health check
     if (event.httpMethod === "GET") {
       return {
         statusCode: 200,
@@ -471,6 +520,7 @@ exports.handler = async (event) => {
       };
     }
 
+    // Only POST allowed
     if (event.httpMethod !== "POST") {
       return {
         statusCode: 405,
@@ -478,11 +528,15 @@ exports.handler = async (event) => {
       };
     }
 
-    // Optional Telegram secret validation
+    // Telegram webhook secret validation
     if (WEBHOOK_SECRET) {
       const receivedSecret =
-        event.headers?.["x-telegram-bot-api-secret-token"] ||
-        event.headers?.["X-Telegram-Bot-Api-Secret-Token"];
+        event.headers?.[
+          "x-telegram-bot-api-secret-token"
+        ] ||
+        event.headers?.[
+          "X-Telegram-Bot-Api-Secret-Token"
+        ];
 
       if (receivedSecret !== WEBHOOK_SECRET) {
         return {
@@ -492,7 +546,9 @@ exports.handler = async (event) => {
       }
     }
 
-    const update = JSON.parse(event.body || "{}");
+    const update = JSON.parse(
+      event.body || "{}"
+    );
 
     await bot.handleUpdate(update);
 
@@ -501,7 +557,10 @@ exports.handler = async (event) => {
       body: "OK",
     };
   } catch (error) {
-    console.error("Webhook Error:", error);
+    console.error(
+      "Webhook Error:",
+      error
+    );
 
     return {
       statusCode: 500,
